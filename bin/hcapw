@@ -1,0 +1,111 @@
+#!/bin/sh
+#L:
+#l:  Copyright (c) 2018 Openvirtus.com, http://openvirtus.com
+#L:
+#L:  Permission is hereby granted, free of charge, to any person obtaining
+#L:  a copy of this software and associated documentation files (the
+#L:  "Software"), to deal in the Software without restriction, including
+#L:  without limitation the rights to use, copy, modify, merge, publish,
+#L:  distribute, sublicense, and/or sell copies of the Software, and to
+#L:  permit persons to whom the Software is furnished to do so, subject to
+#L:  the following conditions:
+#L:
+#L:  The above copyright notice and this permission notice shall be
+#L:  included in all copies or substantial portions of the Software.
+#L:
+#L:  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+#L:  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+#L:  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+#L:  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+#L:  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+#L:  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+#L:  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#L:
+#h: Usage: $0 [-H HOST] [-i INTF] ...
+#h:
+#h: This script helps making Wireshark captures in a remote server.
+#h:
+#h: -v      : Show variables.
+#h: -H HOST : Open in remote machine, create tcpdump if required.
+#h: -I      : Install Wireshark.
+#h: -i INTF : Capture for interface.
+#h: -w      : Open wireshark.
+##:
+capw() {
+    ## Parse command line arguments.
+    local OPTIND optopt= ops=
+    while getopts "H:i:vIw" optopt;do # OPTARG
+        case $optopt in
+            H)     local CAPW_HOST="${OPTARG}";;
+            i)     local CAPW_INTF="${OPTARG}";;
+            v|I|w) local ops="$ops$optopt";;
+            \?) return 1;;
+        esac
+    done
+    shift $(( $OPTIND - 1 ))
+    ##
+    case "$ops" in *v*) capw_variables         ;; esac
+    case "$ops" in *I*) capw_install_wireshark ;; esac
+    case "$ops" in *w*) capw_wireshark "$@"    ;; esac
+}
+capw_show_variables() {
+    echo "CAPW_HOST = $CAPW_HOST"
+    echo "CAPW_INTF = $CAPW_INTF"
+}
+capw_calc_variables() {
+    CAPW_HOST="${CAPW_HOST:-${USER}@127.0.0.1}"
+    CAPW_INTF="${CAPW_INTF:-any}"
+}
+
+
+
+
+## --------------------------------------------------------------------------------
+capw_install_wireshark() {
+    case "${CAPW_HOST}" in
+        *@127.0.0.1|*@localhost) true;;
+        *) ssh -t "$CAPW_HOST" "
+             if ! sudo which tcpdump >/dev/null 2>&1;then
+                 test ! -f /usr/bin/apt-get || sudo apt-get -y install tcpdump
+                 test ! -f /usr/bin/yum     || sudo yum -y install tcpdump
+                 test ! -f /usr/bin/pacman  || sudo pacman -Sy tcpdump
+             else
+                 echo 'TCPDUMP already installed in ${CAPW_HOST}' >&2
+             fi
+             test ! -f /usr/bin/yum || sudo usermod -a -G wireshark \$USER 2>/dev/null || true";;
+    esac
+}
+capw_wireshark() {
+    case "$CAPW_HOST" in
+        *@127.0.0.1|*@localhost)
+            /usr/bin/sudo wireshark -k -i "${CAPW_INTF}" $@;;
+        *)  local c1="sudo tcpdump -s 0 -U -n -w - -i '${CAPW_INTF}' 'not port 22'"
+            local c2="sudo wireshark -i - -k $*"
+            echo "Remote : $c1"
+            echo "Local  : $c2"
+            /usr/bin/sudo true
+            # No (-t), invalid input.
+            ssh "${CAPW_HOST}" "$c1" | /usr/bin/sudo sh -c "$c2";;
+    esac
+}
+capw_tofile() {
+    : wireshark -i any -k -Y "sip" -w "$1"
+    : sudo tcpdump -i any -w "$1"
+    : Filter: wireshark -Y "sip" "$1"
+    : cp -vr "$f" "${HCAPTURE_OUT_DIRECTORY}/${save_prefix}-`date +%Y-%m-%d`-`basename $f`"
+}
+
+
+
+
+## --------------------------------------------------------------------------------
+capw_calc_variables
+if test @"`basename "$0"`" = @"capture-wireshark";then
+    if test -n "$1";then
+        capw "$@"
+    else
+        sed -n 's/^ *#h: \{0,1\}//p' "$0" | sed "s|\\\$0|`basename $0`|g"
+        echo ""
+        sed -n 's/^ *#l: \{0,2\}//p' "$0"
+    fi
+fi
