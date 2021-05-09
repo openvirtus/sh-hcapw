@@ -100,7 +100,7 @@ capw_tofile() {
 
 ## --------------------------------------------------------------------------------
 capw_calc_variables
-if test @"`basename "$0"`" = @"capture-wireshark";then
+if test @"`basename "$0"`" = @"hcapw";then
     if test -n "$1";then
         capw "$@"
     else
