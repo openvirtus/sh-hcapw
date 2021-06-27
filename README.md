@@ -1,14 +1,13 @@
-## HCAPW
+## HHCAPW
 
-    Usage: hcapw [-H HOST] [-i INTF] ...
+    Usage: hcapw [-i INTF][-I] [USER@]HOSTNAME|localhost [WIRESHARK ARGS...]
     
-    This script helps making Wireshark captures in a remote server.
+    Capture network traffic in a remote machine tunneling "tcpdump". You can
+    ensure "tcpdump" is 
     
-    -v      : Show variables.
-    -H HOST : Open in remote machine, create tcpdump if required.
     -I      : Install Wireshark.
     -i INTF : Capture for interface.
-    -w      : Open wireshark.
+
 
 ## DONATIONS
 <ul>

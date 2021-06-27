@@ -24,90 +24,88 @@
 #L:  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 #L:  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #L:
-#r: ## HCAPW
+#r: ## HHCAPW
 #r:
-#h: Usage: $0 [-H HOST] [-i INTF] ...
+#h: Usage: $0 [-i INTF][-I] [USER@]HOSTNAME|localhost [WIRESHARK ARGS...]
 #h:
-#h: This script helps making Wireshark captures in a remote server.
+#h: Capture network traffic in a remote machine tunneling "tcpdump". You can
+#h: ensure "tcpdump" is 
 #h:
-#h: -v      : Show variables.
-#h: -H HOST : Open in remote machine, create tcpdump if required.
 #h: -I      : Install Wireshark.
 #h: -i INTF : Capture for interface.
-#h: -w      : Open wireshark.
 #r:
-capw() {
+hcapw() {
     ## Parse command line arguments.
-    local OPTIND optopt= ops=
-    while getopts "H:i:vIw" optopt;do # OPTARG
-        case $optopt in
-            H)     local CAPW_HOST="${OPTARG}";;
-            i)     local CAPW_INTF="${OPTARG}";;
-            v|I|w) local ops="$ops$optopt";;
+    local OPTIND optopt= ops= intf=any do_install=n
+    while getopts "Ii:" optopt;do # OPTARG
+        case "${optopt}" in
+            i)  local intf="${OPTARG}" ;;
+            I)  local do_install="y"   ;;
             \?) return 1;;
         esac
     done
     shift $(( $OPTIND - 1 ))
-    ##
-    case "$ops" in *v*) capw_variables         ;; esac
-    case "$ops" in *I*) capw_install_wireshark ;; esac
-    case "$ops" in *w*) capw_wireshark "$@"    ;; esac
+    ## Get hostname.
+    local hostname="$1"
+    if test ! -n "${hostname}";then
+        return 0
+    fi
+    shift
+    ## Code to install tcpdump.
+    local icode="
+    if sudo which tcpdump >/dev/null 2>&1;then
+        echo 'TCPDUMP already installed in ${hostname}' >&2
+    elif test -f /usr/bin/apt-get;then
+        sudo apt-get -y install tcpdump
+    elif test -f /usr/bin/yum;then
+        sudo yum -y install tcpdump
+    elif test -f /usr/bin/pacman;then
+        sudo pacman -Sy tcpdump
+    elif test -f /usr/bin/xbps-install;then
+        sudo /usr/bin/xbps-install -Ry tcpdump
+    else
+        echo 'Do not know how to install 'tcpdump'.' >&2
+        exit 1
+    fi
+    if test -f /usr/bin/yum;then
+        sudo usermod -a -G wireshark \$USER 2>/dev/null
+    fi"
+    ## Perform operations.
+    if test @"${do_install}" = @"y" && hcapw_is_local "${hostname}";then
+        sh -c "${icode}"
+    elif test @"${do_install}" = @"y";then
+        ssh -t "${hostname}" "${icode}"
+    elif hcapw_is_local "${hostname}";then
+        sudo wireshark -k -i "${intf}" $@
+    else
+        local c1="tcpdump -s 0 -U -n -w - -i '${intf}' 'not port 22'"
+        local c2="wireshark -i - -k $*"
+        echo "Remote : sudo ${c1}" >&2
+        echo "Local  : sudo ${c2}" >&2
+        hcapw_sudo true ## Ask password, no (-t), invalid input.
+        ssh "${hostname}" "sudo ${c1}" | hcapw_sudo sh -c "${c2}"
+    fi
 }
-capw_show_variables() {
-    echo "CAPW_HOST = $CAPW_HOST"
-    echo "CAPW_INTF = $CAPW_INTF"
+hcapw_is_local() {
+    local host="`echo "${1}" | sed 's|.*@||'`"
+    test @"${host}" = @"127.0.0.1" || test @"${host}" = @"localhost"
 }
-capw_calc_variables() {
-    CAPW_HOST="${CAPW_HOST:-${USER}@127.0.0.1}"
-    CAPW_INTF="${CAPW_INTF:-any}"
+hcapw_sudo() {
+    /usr/bin/sudo \
+        LD_LIBRARY_PATH=/usr/lib:/usr/lib/x86_64-linux-gnu \
+        "$@"
 }
+
+
+
 
 
 
 
 ## --------------------------------------------------------------------------------
-capw_install_wireshark() {
-    case "${CAPW_HOST}" in
-        *@127.0.0.1|*@localhost) true;;
-        *) ssh -t "$CAPW_HOST" "
-             if ! sudo which tcpdump >/dev/null 2>&1;then
-                 test ! -f /usr/bin/apt-get || sudo apt-get -y install tcpdump
-                 test ! -f /usr/bin/yum     || sudo yum -y install tcpdump
-                 test ! -f /usr/bin/pacman  || sudo pacman -Sy tcpdump
-             else
-                 echo 'TCPDUMP already installed in ${CAPW_HOST}' >&2
-             fi
-             test ! -f /usr/bin/yum || sudo usermod -a -G wireshark \$USER 2>/dev/null || true";;
-    esac
-}
-capw_wireshark() {
-    case "$CAPW_HOST" in
-        *@127.0.0.1|*@localhost)
-            /usr/bin/sudo wireshark -k -i "${CAPW_INTF}" $@;;
-        *)  local c1="sudo tcpdump -s 0 -U -n -w - -i '${CAPW_INTF}' 'not port 22'"
-            local c2="sudo wireshark -i - -k $*"
-            echo "Remote : $c1"
-            echo "Local  : $c2"
-            /usr/bin/sudo true
-            # No (-t), invalid input.
-            ssh "${CAPW_HOST}" "$c1" | /usr/bin/sudo sh -c "$c2";;
-    esac
-}
-capw_tofile() {
-    : wireshark -i any -k -Y "sip" -w "$1"
-    : sudo tcpdump -i any -w "$1"
-    : Filter: wireshark -Y "sip" "$1"
-    : cp -vr "$f" "${HCAPTURE_OUT_DIRECTORY}/${save_prefix}-`date +%Y-%m-%d`-`basename $f`"
-}
-
-
-
-
-## --------------------------------------------------------------------------------
-capw_calc_variables
 if test @"`basename "$0"`" = @"hcapw";then
     if test -n "$1";then
-        capw "$@"
+        hcapw "$@"
     else
         sed -n 's/^ *#h: \{0,1\}//p' "$0" | sed "s|\\\$0|`basename $0`|g"
         echo ""
